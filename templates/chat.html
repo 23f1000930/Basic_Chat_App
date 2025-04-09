@@ -1,0 +1,217 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>Welcome, {{ username }}!</h3>
+<a href="{{ url_for('logout') }}" class="btn btn-danger btn-sm mb-2">Logout</a>
+
+<!-- 🔔 Mention Alert -->
+<div id="mention-alert" class="alert alert-info d-none"></div>
+
+<div class="row">
+    <div class="col-md-9 position-relative">
+        <!-- 💬 Chat Area -->
+        <div id="chat-box" class="border p-3 mb-2" style="height:300px; overflow-y: scroll;">
+            {% for msg in messages %}
+                <p id="msg-{{ msg.id }}">
+                    <strong>{{ msg.username }}:</strong>
+                    <span class="msg-text">{{ msg.text|safe }}</span>
+                    {% if msg.username == username %}
+                        <button class="btn btn-warning btn-sm" onclick="openEditModal('{{ msg.id }}')"><i class="bi bi-pencil"></i></button>
+                        <button class="btn btn-danger btn-sm" onclick="deleteMessage('{{ msg.id }}')"><i class="bi bi-trash"></i></button>
+                    {% endif %}
+                </p>
+            {% endfor %}
+        </div>
+
+        <!-- ✏️ Message Input -->
+        <input type="text" id="message" class="form-control" placeholder="Type your message and hit Enter...">
+        <!-- 👤 Mention Dropdown -->
+        <div id="mention-dropdown" class="dropdown-menu show d-none position-absolute bg-white border" style="z-index: 1000;"></div>
+    </div>
+    <div class="col-md-3">
+        <h5>🟢 Online Users</h5>
+        <ul id="user-list" class="list-group"></ul>
+    </div>
+</div>
+
+<!-- 🧾 Edit Modal -->
+<div class="modal fade" id="editModal" tabindex="-1" aria-labelledby="editModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="edit-form">
+        <div class="modal-header">
+          <h5 class="modal-title" id="editModalLabel">Edit Message</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="edit-msg-id">
+          <textarea id="edit-msg-text" class="form-control" rows="3" required></textarea>
+        </div>
+        <div class="modal-footer">
+          <button type="submit" class="btn btn-primary">Save Changes</button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Socket.IO -->
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+<!-- Bootstrap JS (for modal functionality) -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+    const socket = io();
+    const messageInput = document.getElementById('message');
+    const chatBox = document.getElementById('chat-box');
+    const alertBox = document.getElementById('mention-alert');
+    const userList = document.getElementById('user-list');
+    const mentionDropdown = document.getElementById('mention-dropdown');
+    const currentUser = "{{ username }}";
+
+    // Emoji Parser
+    function parseEmojis(text) {
+        const emojiMap = {
+            ":smile:": "😄",
+            ":sad:": "😢",
+            ":laugh:": "😂",
+            ":heart:": "❤️",
+            ":fire:": "🔥",
+            ":thumbsup:": "👍"
+        };
+        return text.replace(/:\w+:/g, match => emojiMap[match] || match);
+    }
+
+    // Send message on Enter
+    messageInput.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter' && this.value.trim()) {
+            const message = { username: currentUser, text: this.value };
+            socket.send(message);
+            this.value = '';
+            mentionDropdown.classList.add("d-none");
+        }
+    });
+
+    // Receive message
+    socket.on('message', function(msg) {
+        const p = document.createElement('p');
+        p.id = `msg-${msg.id}`;
+        const parsedText = parseEmojis(msg.text);
+        p.innerHTML = `<strong>${msg.username}:</strong> <span class="msg-text">${parsedText}</span>`;
+        if (msg.username === currentUser) {
+            p.innerHTML += ` <button class="btn btn-outline-primary btn-sm" onclick="openEditModal(${msg.id})">✏️</button>
+                             <button class="btn btn-outline-danger btn-sm" onclick="deleteMessage(${msg.id})">🗑️</button>`;
+        }
+        chatBox.appendChild(p);
+        chatBox.scrollTop = chatBox.scrollHeight;
+
+        if (msg.text.includes('@' + currentUser)) {
+            alertBox.textContent = `🔔 You were mentioned by ${msg.username}!`;
+            alertBox.classList.remove('d-none');
+            setTimeout(() => alertBox.classList.add('d-none'), 5000);
+        }
+    });
+
+    // Online users list
+    socket.on('user_list', function(users) {
+        userList.innerHTML = '';
+        users.forEach(user => {
+            const li = document.createElement('li');
+            li.classList.add('list-group-item');
+            li.textContent = user;
+            userList.appendChild(li);
+        });
+    });
+
+    // Modal for editing
+    function openEditModal(id) {
+        const msgElem = document.querySelector(`#msg-${id} .msg-text`);
+        const originalText = msgElem.innerText;
+        document.getElementById('edit-msg-id').value = id;
+        document.getElementById('edit-msg-text').value = originalText;
+        new bootstrap.Modal(document.getElementById('editModal')).show();
+    }
+
+    document.getElementById('edit-form').addEventListener('submit', function(e) {
+        e.preventDefault();
+        const id = document.getElementById('edit-msg-id').value;
+        const newText = document.getElementById('edit-msg-text').value;
+        fetch(`/edit_message/${id}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: newText })
+        }).then(() => {
+            const modal = bootstrap.Modal.getInstance(document.getElementById('editModal'));
+            modal.hide();
+        });
+    });
+
+    function deleteMessage(id) {
+        if (confirm("Are you sure you want to delete this message?")) {
+            fetch(`/delete_message/${id}`, { method: 'POST' });
+        }
+    }
+
+    socket.on('edit_message', function(data) {
+        const msgElem = document.querySelector(`#msg-${data.id} .msg-text`);
+        if (msgElem) msgElem.innerHTML = parseEmojis(data.text);
+    });
+
+    socket.on('delete_message', function(data) {
+        const msgElem = document.getElementById(`msg-${data.id}`);
+        if (msgElem) msgElem.remove();
+    });
+
+    // 🧠 Mention Autocomplete
+    messageInput.addEventListener("input", function(e) {
+        const cursorPos = this.selectionStart;
+        const text = this.value.slice(0, cursorPos);
+        const match = text.match(/@(\w*)$/);
+
+        if (match) {
+            const query = match[1].toLowerCase();
+            const matchingUsers = Array.from(userList.children)
+                .map(li => li.textContent)
+                .filter(name => name.toLowerCase().startsWith(query));
+
+            if (matchingUsers.length > 0) {
+                showMentionDropdown(matchingUsers, messageInput);
+            } else {
+                mentionDropdown.classList.add("d-none");
+            }
+        } else {
+            mentionDropdown.classList.add("d-none");
+        }
+    });
+
+    function showMentionDropdown(users, inputElement) {
+        mentionDropdown.innerHTML = '';
+        users.forEach(user => {
+            const item = document.createElement("a");
+            item.className = "dropdown-item";
+            item.textContent = user;
+            item.onclick = () => insertMention(user);
+            mentionDropdown.appendChild(item);
+        });
+
+        const rect = inputElement.getBoundingClientRect();
+        mentionDropdown.style.top = rect.bottom + window.scrollY + "px";
+        mentionDropdown.style.left = rect.left + window.scrollX + "px";
+        mentionDropdown.classList.remove("d-none");
+    }
+
+    function insertMention(username) {
+        const text = messageInput.value;
+        const cursorPos = messageInput.selectionStart;
+        const before = text.slice(0, cursorPos).replace(/@(\w*)$/, `@${username} `);
+        const after = text.slice(cursorPos);
+        messageInput.value = before + after;
+        messageInput.focus();
+        mentionDropdown.classList.add("d-none");
+    }
+
+    messageInput.addEventListener("blur", () => {
+        setTimeout(() => mentionDropdown.classList.add("d-none"), 150);
+    });
+</script>
+{% endblock %}
