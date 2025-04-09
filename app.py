@@ -8,7 +8,6 @@ from flask_socketio import SocketIO, send, emit
 from werkzeug.security import generate_password_hash, check_password_hash
 from models import db, User, Message
 import requests
-import httpx
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret!'
@@ -101,26 +100,15 @@ def handle_message(msg):
     text = msg['text']
     if text.startswith('/gif '):
         query = text[5:]
-        try:
-            response = httpx.get(
-                f'https://api.giphy.com/v1/gifs/search',
-                params={
-                    'api_key': 'xvIAbtoVihHfwvmgMUtZChgAAaypPq42',
-                    'q': query,
-                    'limit': 1,
-                    'rating': 'R'
-                },
-                timeout=5
-            )
-            data = response.json()
-            if data['data']:
-                gif_url = data['data'][0]['images']['downsized']['url']
-                text = f'<img src="{gif_url}" width="200">'
-            else:
-                text = 'GIF not found!'
-        except Exception as e:
-            print(f"Giphy error: {e}")
-            text = 'GIF fetch failed!'
+        response = requests.get(
+            f'https://api.giphy.com/v1/gifs/search?api_key=xvIAbtoVihHfwvmgMUtZChgAAaypPq42&q={query}&limit=1&rating=R'
+        )
+        data = response.json()
+        if data['data']:
+            gif_url = data['data'][0]['images']['downsized']['url']
+            text = f'<img src="{gif_url}" width="200">'
+        else:
+            text = 'GIF not found!'
 
     message = Message(username=current_user.username, text=text, user_id=current_user.id)
     db.session.add(message)
