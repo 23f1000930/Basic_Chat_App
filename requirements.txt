@@ -7,3 +7,4 @@ requests==2.31.0
 Werkzeug==2.3.6
 gunicorn
 eventlet
+httpx
